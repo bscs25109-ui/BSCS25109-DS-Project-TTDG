@@ -9,7 +9,6 @@
 
 #include <unistd.h>
 #include <sys/socket.h>
-#define _CRT_SECURE_NO_WARNINGS    // stops VS code from showing warnings for functions like fopen , scanf and other
 #include <iostream>
 #include <string>
 #include <cstdint>
@@ -18,12 +17,12 @@
 #include <cstdio>
 #include <sstream> 
 #include <stdexcept>
+#include "helper.h"
 using namespace std;
 
 // int32_t is used for 32-bit signed integers, int64_t is used for 64-bit signed integers
 // ---- Constants ----
-const int32_t MAX_VARS_PER_FRAME = 16;
-const int32_t MAX_STACK_DEPTH = 64;
+
 const int32_t MAX_FUNCS = 128;
 const int32_t MAX_TOKENS = MAX_VARS_PER_FRAME + 2;          // kW + func_name + upto 16 params/args
 const int32_t MAX_PATCHES = MAX_FUNCS * 4;
@@ -158,48 +157,6 @@ public:
 		return stepCount;
     }
 };
-
-// Core structs
-struct Variable
-{
-    string name;
-    int32_t value;
-};
-struct Frame
-{
-    string func_name;
-    int32_t argc;
-    Variable argv[MAX_VARS_PER_FRAME];
-    int32_t returnLine;
-    Variable locals[MAX_VARS_PER_FRAME];
-    int32_t localCount;
-};
-struct Snapshot
-{
-    Frame callStack[MAX_STACK_DEPTH];
-    int32_t stackDepth;
-};
-struct TTDBHeader
-{
-    char magic[4]; // "TTDB"
-    int32_t version;
-    int32_t stepCount;
-    int64_t indexOffset;
-};
-
-
-// resolve.bin - bookkeeping
-struct FuncEntry
-{
-    string funcName;
-    int64_t byteOffsetInResolveBin; // where this function's FUNC header record sits
-};
-struct PendingPatch
-{
-    int64_t byteOffsetOfOffsetField; // where in resolve.bin to seek back and overwrite
-    string targetFuncName;
-};
-
 
 
 // PASS 0x0: READING source.bin + VALIDITY CHECK

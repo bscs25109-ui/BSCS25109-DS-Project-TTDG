@@ -68,27 +68,54 @@ public:
     // Implement these functions:
     Queue()
     {
-
+        front = nullptr; 
+        rear = nullptr;
+        count = 0;
     }
     ~Queue()
     {
-
+        while (!isEmpty()) 
+        {
+            dequeue();
+        }
     }
     void enqueue(const T &val)
     {
-
+        Node* temp = new Node(val);
+        if (rear == nullptr) 
+        {
+            front = rear = temp;
+        } else 
+        {
+            rear->next = temp;
+            rear = temp;
+        }
+        count++;
     }
     T dequeue()
     {
-
+        if (isEmpty()) 
+        {
+            throw runtime_error("Queue is empty");
+        }
+        Node* temp = front;
+        T ans = front->data;
+        front = front->next;
+        if (front == nullptr) 
+        {
+            rear = nullptr;
+        }
+        delete temp;
+        count--;
+        return ans;
     }
     bool isEmpty()
     {
-        
+        return count == 0;
     }
     int size()
     {
-
+        return count;
     }
 };
 

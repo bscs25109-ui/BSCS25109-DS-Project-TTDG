@@ -48,3 +48,9 @@ Implemented the linked-list stack which i commit
 
 -> Tested with the demo program and  Added comments to
    the whole code for my own understanding and pushed to main
+
+
+9-11-2026   
+-> Started Phase 2 and add structures (Frame, Snapshot, TTDBHeader) in helper.h to share data across Server, Client, and Load Balancer.
+-> Implemented the custom Queue in load_balancer.cpp.
+-> Cleaned up server.cpp to use helper.h and verified it still compiles.
