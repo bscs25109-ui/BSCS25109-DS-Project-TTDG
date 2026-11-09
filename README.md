@@ -68,3 +68,7 @@ Implemented the linked-list stack which i commit
 
 
  ->added command handling, input checks, and the main loop. Completed file upload/download with CRC checks and local time travel features.
+
+
+ ->implemented LB socket helpers and  added sendAll (MSG_NOSIGNAL), sendError (with CRC-32 trailer), createListenSocket (SO_REUSEADDR, SOCK_CLOEXEC), and connectToServer.
+
