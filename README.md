@@ -57,3 +57,10 @@ Implemented the linked-list stack which i commit
 
 -> added small CRC-32 helper (crcTick, crcOf) and
    TailSeal class in helper.h for the [status][body][crc32] traileron every hop. 
+
+
+-> add functions of client.cpp part a 
+   buffer -> TailSeal verify -> status0 = save body
+   as .tdbg, status1 = return body as error
+   on checksum failure,file is removed and error is "checksum mismatch, response corrupted".
+ 

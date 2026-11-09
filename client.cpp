@@ -61,23 +61,102 @@ bool recvAll(int sock, char *buf, size_t n)
 {
     // recv() can return fewer bytes than asked for, so keep calling it until exactly n bytes are read.
     // Return false if the connection closes or fails before n bytes arrive.
+    size_t have  = 0;
+    while (have < n)
+    {
+        ssize_t k = recv(sock, buf + have, n - have, 0);
+        if (k <= 0)
+        {
+            return false;
+        }
+        have += k;
+    }
+    return true;
 }
 bool sendAll(int sock, const char *buf, size_t n)
 {
     // send() can send fewer bytes than asked for, so keep calling it until all n bytes are sent.
     // Use the flag MSG_NOSIGNAL. Return false if the connection fails.
+    size_t done = 0;
+    while (done < n)
+    {
+        ssize_t k = send(sock, buf + done, n - done, MSG_NOSIGNAL);
+        if (k <= 0)
+        {
+            return false;
+        }
+        done += k;
+    }
+    return true;
 }
 
 int connectToHost(const char *host, int port)
 {
     // Create a TCP socket and connect it to host:port.
     // Return the socket, or -1 if the connection fails.
+    int s = socket(AF_INET, SOCK_STREAM, 0);
+    if (s < 0)
+    {
+        return -1;
+    }
+    sockaddr_in a;
+    memset(&a, 0, sizeof(a));
+    a.sin_family = AF_INET;
+    a.sin_port = htons(port);
+    if (inet_pton(AF_INET, host, &a.sin_addr) != 1)
+    {
+        close(s);
+        return -1;
+    }
+    if (connect(s, (struct sockaddr *)&a, sizeof(a)) < 0)
+    {
+        close(s);
+        return -1;
+    }
+    return s;
 }
 bool uploadSource(int sock, const char *sourcePath)
 {
     // have to do checksum and then send
     // When the file is finished, call shutdown(sock, SHUT_WR). This is how the server knows the string is complete.
     // Return false if the file cannot be opened or any send fails.
+    
+    FILE* f = fopen(sourcePath, "rb");
+    if (!f)
+    {
+        return false;
+    }
+    // compute the CRC-32 of the file while sending it to the socket
+    uint32_t crc = 0xFFFFFFFFu;
+    char chunk[IO_BUFFER_SIZE];
+
+    size_t got;
+    while((got = fread(chunk, 1, IO_BUFFER_SIZE, f)) > 0)
+    {
+        for (size_t i = 0; i < got; i++) 
+        {
+            crc = crcTick(crc, (unsigned char)chunk[i]);
+        }
+        if (!sendAll(sock, chunk, got))
+        {
+            fclose(f);
+            return false;
+        }
+    }
+    fclose(f);
+    crc ^= 0xFFFFFFFFu;
+    char tail[4];
+    tail[0] = (crc >> 0) & 0xFF;
+    tail[1] = (crc >> 8) & 0xFF;
+    tail[2] = (crc >> 16) & 0xFF;
+    tail[3] = (crc >> 24) & 0xFF;
+    if (!sendAll(sock, tail, 4))
+    {
+        return false;
+    }
+    // call shutdown to signal the server that the upload is complete
+    shutdown(sock, SHUT_WR);
+    return true;
 }
 bool receiveResponse(int sock, const char *outTdbgPath, string &outError)
 {
@@ -86,6 +165,53 @@ bool receiveResponse(int sock, const char *outTdbgPath, string &outError)
     // Status 1: collect the payload into outError. Status 0: write the payload to the file.
     // At the end call verify(). If it fails, delete the file, set outError to
     // "checksum mismatch, response corrupted" and return false.
+
+    vector<char> payload;
+    char chunk[IO_BUFFER_SIZE];
+    ssize_t k;
+    while ((k = recv(sock, chunk, IO_BUFFER_SIZE, 0)) > 0)
+    {
+        payload.insert(payload.end(), chunk, chunk + k);
+    }
+    TailSeal seal;
+    if(!payload.empty())
+    {
+        seal.push(payload.data(), payload.size());
+    }
+   if(!seal.ok())
+    {
+        remove(outTdbgPath);
+        outError = "checksum mismatch, response corrupted";
+        return false;
+    }
+    if(payload.size()<5)
+    {
+        remove(outTdbgPath);
+        outError = "response too short";
+        return false;
+    }
+    unsigned char status = payload[0];
+    const char* data = payload.data() + 1;
+    size_t blen = payload.size() - 5; 
+
+    if(status ==1)
+    {
+        outError.assign(data, blen);
+        return false;
+    }
+    FILE* f = fopen(outTdbgPath, "wb");
+    if(!f)
+    {
+        outError = "failed to open output file";
+        return false;
+    }
+    if(blen > 0)
+    {
+        fwrite(data, 1, blen, f);
+
+    }
+    fclose(f);
+    return true;
 }
 
 // =============================================================================================
