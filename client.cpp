@@ -27,6 +27,7 @@
 #include "helper.h"
 #include <sstream>
 #include <sys/types.h>
+#include <fcntl.h>     // for open(). open() is used to open the .tdbg file for reading.
 using namespace std;
 
 // ---- Constants ----
@@ -42,7 +43,7 @@ int LB_PORT = 5000;
 // ---- Structs only the client needs ----
 struct TdbgReader
 {
-    FILE* file;              // use standard C file pointer
+    ssize_t file_index;           
     TTDBHeader header;
     vector<int64_t> index;
 };
@@ -57,7 +58,7 @@ struct DebugSession
 // PART A: TALKING TO THE LOAD BALANCER
 // =============================================================================================
 
-bool recvAll(int sock, char *buf, size_t n)
+bool recvAll(int sock, char *buf, size_t n) // receive exactly n bytes from the socket, return false if the connection closes or fails before n bytes arrive
 {
     // recv() can return fewer bytes than asked for, so keep calling it until exactly n bytes are read.
     // Return false if the connection closes or fails before n bytes arrive.
@@ -73,7 +74,7 @@ bool recvAll(int sock, char *buf, size_t n)
     }
     return true;
 }
-bool sendAll(int sock, const char *buf, size_t n)
+bool sendAll(int sock, const char *buf, size_t n) // send exactly n bytes to the socket, return false if the connection closes or fails before n bytes are sent
 {
     // send() can send fewer bytes than asked for, so keep calling it until all n bytes are sent.
     // Use the flag MSG_NOSIGNAL. Return false if the connection fails.
@@ -90,17 +91,18 @@ bool sendAll(int sock, const char *buf, size_t n)
     return true;
 }
 
-int connectToHost(const char *host, int port)
+
+int connectToHost(const char *host, int port)// establish a tcp connection between your client and the load balancer, return the socket or -1 if the connection fails
 {
     // Create a TCP socket and connect it to host:port.
     // Return the socket, or -1 if the connection fails.
-    int s = socket(AF_INET, SOCK_STREAM, 0);
+    int s = socket(AF_INET, SOCK_STREAM, 0); // If socket creation fails, the function returns -1.
     if (s < 0)
     {
         return -1;
     }
-    sockaddr_in a;
-    memset(&a, 0, sizeof(a));
+    sockaddr_in a;   // stores the destination address
+    memset(&a, 0, sizeof(a));  
     a.sin_family = AF_INET;
     a.sin_port = htons(port);
     if (inet_pton(AF_INET, host, &a.sin_addr) != 1)
@@ -115,7 +117,7 @@ int connectToHost(const char *host, int port)
     }
     return s;
 }
-bool uploadSource(int sock, const char *sourcePath)
+bool uploadSource(int sock, const char *sourcePath)//read the original file and calculate the checksum and send both the file and checksum to the LB return false if the file cannot be opened or any send fails
 {
     // have to do checksum and then send
     // When the file is finished, call shutdown(sock, SHUT_WR). This is how the server knows the string is complete.
@@ -158,7 +160,7 @@ bool uploadSource(int sock, const char *sourcePath)
     shutdown(sock, SHUT_WR);
     return true;
 }
-bool receiveResponse(int sock, const char *outTdbgPath, string &outError)
+bool receiveResponse(int sock, const char *outTdbgPath, string &outError)//rec thew  response from the LB, check the checksum, and eith save the result or return an error
 {
     // Reply on the wire: [status][payload][CRC-32]. The CRC covers the status byte too.
     // Feed every received byte (status included) to a TrailerChecker.
@@ -221,83 +223,151 @@ bool receiveResponse(int sock, const char *outTdbgPath, string &outError)
 // The index lets us jump straight to any step without reading the steps before it.
 // =============================================================================================
 
-// hepler functions for reading the .tdbg file
-bool read_exact(int fd, void *buf, size_t n)
+bool grabN(int fd, void *buf, size_t n) // read exactly n bytes from the file descriptor, return false if the file ends or fails before n bytes are read
 {
-    char *ptr = (char *)buf;
-    size_t bytes_read = 0;
-    while (bytes_read < n)
+    // read() can return fewer bytes than asked for, so keep calling it until exactly n bytes are read.
+    // Return false if the file ends or fails before n bytes are read.
+    size_t pos = 0;
+    while (pos < n)
     {
-        ssize_t result = read(fd, ptr + bytes_read, n - bytes_read);
-        if (result <= 0)
+        ssize_t k = read(fd, (char*)buf + pos, n - pos);
+        if (k <= 0)
         {
             return false;
         }
-        bytes_read += result;
+        pos += k;
     }
     return true;
 }
-// helper function to read a string from a file
-string read_string(FILE * f)
+bool grabI(int fd, int32_t &v) 
 {
-    int32_t size= 0;
-    if (fread(&size, sizeof(int32_t), 1, f) != 1)
-    {
-        return "";
-    }
-    if (size < 0)
-    {
-        return "";
-    }
-    string s(size, '\0');
-    fread(&s[0],1, size, f);
-    return s;
+    return grabN(fd, &v, 4);
 }
+bool grabS(int fd, string &s) 
+{
+    int32_t len;
+    if (!grabI(fd, len))
+    {
+        return false;
+    }
+    if (len < 0)
+    {
+        return false;
+    }
+    s.resize(len);
+    return grabN(fd, &s[0], len);
+
+}
+bool grabV(int fd, Variable &v) 
+{
+    if (!grabS(fd, v.name))
+    {
+        return false;
+    }
+    if (!grabI(fd, v.value))
+    {
+        return false;
+    }
+    return true;
+}
+bool grabF(int fd, Frame &f)
+{
+    if (!grabS(fd, f.func_name))
+    {
+        return false;
+    }
+    if (!grabI(fd, f.argc))
+    {   
+        return false;
+    }
+    if (f.argc < 0 || f.argc > MAX_VARS_PER_FRAME)
+    {
+        return false;
+    }
+    for (int i = 0; i < f.argc; i++)
+    {
+        if (!grabV(fd, f.argv[i]))
+        {
+            return false;
+        }
+    }
+    if (!grabI(fd, f.returnLine))
+    {
+        return false;
+    }
+    if (!grabI(fd, f.localCount))
+    {
+        return false;
+    }
+    if (f.localCount < 0 || f.localCount > MAX_VARS_PER_FRAME)
+    {
+        return false;
+    }
+    for (int i = 0; i < f.localCount; i++)
+    {
+        if (!grabV(fd, f.locals[i]))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool openTdbg(const char *path, TdbgReader &r)
 {
-    r.file = fopen(path, "rb");
-    if (!r.file) return false;
-
-    // FIX: Read field-by-field to avoid struct padding issues!
-    if (fread(r.header.magic, 1, 4, r.file) != 4) {
-        fclose(r.file); r.file = nullptr; return false;
-    }
-    if (fread(&r.header.version, sizeof(int32_t), 1, r.file) != 1) {
-        fclose(r.file); r.file = nullptr; return false;
-    }
-    if (fread(&r.header.stepCount, sizeof(int32_t), 1, r.file) != 1) {
-        fclose(r.file); r.file = nullptr; return false;
-    }
-    if (fread(&r.header.indexOffset, sizeof(int64_t), 1, r.file) != 1) {
-        fclose(r.file); r.file = nullptr; return false;
-    }
-
-    // check the magic
-    if (r.header.magic[0] != 'T' || r.header.magic[1] != 'T' || r.header.magic[2] != 'D' || r.header.magic[3] != 'B')
+    r.file_index =-1;
+    r.index.clear();
+    int fd = open(path, O_RDONLY);
+    if (fd < 0)
     {
-        fclose(r.file); r.file = nullptr; return false;
+        return false;
     }
+    char payload[20];
+    if (!grabN(fd, payload, 20))
+    {
+        close(fd);
+        return false;
+    }
+    memcpy(r.header.magic, payload, 4);
+    memcpy(&r.header.version, payload + 4, 4);
+    memcpy(&r.header.stepCount, payload + 8, 4);
+    memcpy(&r.header.indexOffset, payload + 12, 8);
 
-    // seek to the index and read it
-    r.index.resize(r.header.stepCount);
-    if (fseek(r.file, r.header.indexOffset, SEEK_SET) != 0)
+    if(memcmp(r.header.magic, "TTDB", 4) != 0 || r.header.version != 1 || r.header.stepCount < 0 || r.header.indexOffset < 20)
     {
-        fclose(r.file); r.file = nullptr; return false;
+        close(fd);
+        return false;
     }
-    
-    if(fread(r.index.data(), sizeof(int64_t), r.header.stepCount, r.file) != (size_t)r.header.stepCount)
+    if (r.header.version != 1)
     {
-        fclose(r.file); r.file = nullptr; return false;
+        close(fd);
+        return false;
     }
+    if(r.header.stepCount < 0)
+    {
+        close(fd);
+        return false;
+    }
+    if(lseek(fd, r.header.indexOffset, SEEK_SET) < 0)
+    {
+        close(fd);
+        return false;
+    }
+    r.index.assign(r.header.stepCount, 0);
+    if(!grabN(fd, r.index.data(), r.header.stepCount * sizeof(int64_t)))
+    {
+        close(fd);
+        return false;
+    }
+    r.file_index = fd;
     return true;
 }
 void closeTdbg(TdbgReader &r)
 {
-    // 
-    if (r.file)
+    if (r.file_index >= 0)
     {
-        fclose(r.file);
-        r.file = nullptr;
+        close(r.file_index);
+        r.file_index = -1;
     }
     r.index.clear();
 }
@@ -308,36 +378,31 @@ Snapshot *readSnapshotAt(TdbgReader &r, int32_t step)
         return nullptr;
     }
     // seek to the snapshot
-    if (fseek(r.file, r.index[step], SEEK_SET) != 0)
+    if (lseek(r.file_index, r.index[step], SEEK_SET) != 0)
     {
         return nullptr;
     }
     // read the snapshot
     Snapshot *s = new Snapshot();
-    if (fread(&s->stackDepth, sizeof(int32_t), 1, r.file) != 1)
+    if(!grabI(r.file_index, s->stackDepth))
     {
         delete s;
         return nullptr;
     }
+    if (s->stackDepth < 0 || s->stackDepth > MAX_STACK_DEPTH)
+    {
+        delete s;
+        return nullptr;
+    }
+
     // read each frame
     for (int32_t i = 0; i < s->stackDepth; ++i)
     {
-        Frame &f = s->callStack[i];
-        f.func_name = read_string(r.file);
-        fread(&f.argc, sizeof(int32_t), 1, r.file);
-        for (int32_t j = 0; j < f.argc; ++j)
+        if (!grabF(r.file_index, s->callStack[i]))
         {
-            f.argv[j].name = read_string(r.file);
-            fread(&f.argv[j].value, sizeof(int32_t), 1, r.file);
+            delete s;
+            return nullptr;
         }
-        fread(&f.returnLine, sizeof(int32_t), 1, r.file);
-        fread(&f.localCount, sizeof(int32_t), 1, r.file);
-        for (int32_t j = 0; j < f.localCount; ++j)
-        {
-            f.locals[j].name = read_string(r.file);
-            fread(&f.locals[j].value, sizeof(int32_t), 1, r.file);
-        }
-
     }
     return s;
 }
@@ -348,9 +413,10 @@ Snapshot *readSnapshotAt(TdbgReader &r, int32_t step)
 
 void initSession(DebugSession &s)
 {
-    s.active_flag = 0; 
-    s.reader.file = nullptr;
+    s.active_flag = 0;
     s.currentStep = 0;
+    s.reader.file_index = -1;
+    s.reader.index.clear();
 }
 void closeSession(DebugSession &s)
 {

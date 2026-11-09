@@ -64,3 +64,4 @@ Implemented the linked-list stack which i commit
    as .tdbg, status1 = return body as error
    on checksum failure,file is removed and error is "checksum mismatch, response corrupted".
  
+ -> added functions to read TDBG data, load the file index, find specific steps, and read Snapshots while checking for invalid data.
