@@ -54,3 +54,6 @@ Implemented the linked-list stack which i commit
 -> Started Phase 2 and add structures (Frame, Snapshot, TTDBHeader) in helper.h to share data across Server, Client, and Load Balancer.
 -> Implemented the custom Queue in load_balancer.cpp.
 -> Cleaned up server.cpp to use helper.h and verified it still compiles.
+
+-> added small CRC-32 helper (crcTick, crcOf) and
+   TailSeal class in helper.h for the [status][body][crc32] traileron every hop. 
