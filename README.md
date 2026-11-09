@@ -65,3 +65,6 @@ Implemented the linked-list stack which i commit
    on checksum failure,file is removed and error is "checksum mismatch, response corrupted".
  
  -> added functions to read TDBG data, load the file index, find specific steps, and read Snapshots while checking for invalid data.
+
+
+ ->added command handling, input checks, and the main loop. Completed file upload/download with CRC checks and local time travel features.
