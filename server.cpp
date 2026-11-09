@@ -7,17 +7,21 @@
 //   3. Pass 0X2   -- execute resolve.bin: tokenize ONE line at a time, update the call stack, take a snapshot -> Timeline
 //   4. Pass 0X3   -- serialize Timeline -> session.tdbg(header + snapshot records + dense index)
 
-#include <unistd.h>
-#include <sys/socket.h>
 #include <iostream>
 #include <string>
 #include <cstdint>
 #include <fstream>
 #include <cstdint>
+#include <cstring>
 #include <cstdio>
 #include <sstream> 
 #include <stdexcept>
 #include "helper.h"
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <vector>
 using namespace std;
 
 // int32_t is used for 32-bit signed integers, int64_t is used for 64-bit signed integers

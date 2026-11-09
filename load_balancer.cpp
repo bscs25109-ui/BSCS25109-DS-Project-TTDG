@@ -317,6 +317,36 @@ void relayOneClient(ClientInfo &c)
     // 5. Server -> client: repeat recv() from serverSock and sendAll() to clientSock.
     //    Stop when recv() returns 0 (the server sent its whole reply and closed) or fails.
     // 6. Close both sockets.
+    int serverSock = connectToServerWithWakeup();
+    if (serverSock == -1)
+    {
+        sendError(c.sock, "backend server failed to start");
+        close(c.sock);
+        return;
+    }
+
+    char buff[IO_BUFFER_SIZE];
+    ssize_t k;
+    while ((k = recv(c.sock, buff, IO_BUFFER_SIZE, 0)) > 0)
+    {
+        if (!sendAll(serverSock, buff, k))
+        {
+            break;
+
+        }
+    }
+
+    shutdown(serverSock, SHUT_WR);
+
+    while ((k = recv(serverSock, buff, IO_BUFFER_SIZE, 0)) > 0)
+    {
+        if (!sendAll(c.sock, buff, k))
+        {
+            break;
+        }
+    }
+    close(serverSock);
+    close(c.sock);
 }
 
 
@@ -335,6 +365,39 @@ void acceptLoop(int listenSock)
     //   Otherwise enqueue the client socket.
     // Never wait for the server here, so new clients are always accepted quickly.
     // If accept() fails, print the error and keep going (do not end the thread).
+
+    while(flag)
+    {
+        sockaddr_in clientAddr;
+        socklen_t addrLen = sizeof(clientAddr);
+        int clientSock = accept(listenSock, (struct sockaddr *)&clientAddr, &addrLen);
+        
+        if (clientSock < 0)
+        {
+            perror("accept");
+            continue;
+        }
+
+        ClientInfo c;
+        c.sock = clientSock;
+        c.address = inet_ntoa(clientAddr.sin_addr);
+        c.port = ntohs(clientAddr.sin_port);
+        c.arrivedAt = time(nullptr);
+
+        queueMutex.lock();
+        if (pendingClients.size() >= MAX_PENDING_CLIENTS)
+        {
+            queueMutex.unlock();
+            sendError(c.sock, "server busy, try again later");
+            close(c.sock);
+        }
+        else
+        {
+            pendingClients.enqueue(c);
+            queueMutex.unlock();
+        }
+
+    }
 }
 void dispatcherLoop()
 {
@@ -342,6 +405,27 @@ void dispatcherLoop()
     // Repeat:
     //   Lock queueMutex, take ONE client out of the queue if there is one, unlock.
     //   If we got a client: call relayOneClient(). The next client is taken out of the queue only after this one is finished.
+    while(flag)
+    {
+        ClientInfo c;
+        bool isClient = false;
+        queueMutex.lock();
+        if (!pendingClients.isEmpty())
+        {
+            c = pendingClients.dequeue();
+            isClient = true;
+        }
+        queueMutex.unlock();
+
+        if (isClient)
+        {
+            relayOneClient(c);
+        }
+        else
+        {
+            usleep(100 * 1000); // 100 ms
+        }
+    }
 }
 
 void handler(int sg) {
@@ -355,5 +439,27 @@ int main(int argc, char *argv[])
     // 2. listenSock = createListenSocket(LB_PORT).
     // 3. Start a thread that runs acceptLoop(listenSock) and detach it.
     // 4. Call dispatcherLoop().
+    if(argc >=2)
+    {
+       serverHost = argv[1];
+    }
+    if(argc >=3)
+    {
+        serverPort = atoi(argv[2]);
+    }
+    if(argc >=4)
+    {
+        lbPort = atoi(argv[3]);
+    }
+
+    int listenSock = createListenSocket(lbPort);
+     cout << "LB listening on port " << lbPort << ", forwarding to " 
+         << serverHost << ":" << serverPort << "\n";
+
+    thread t(acceptLoop, listenSock);
+    t.detach();
+    dispatcherLoop();
+    close(listenSock);
+    
     return 0;
 }

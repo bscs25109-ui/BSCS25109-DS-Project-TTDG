@@ -378,7 +378,7 @@ Snapshot *readSnapshotAt(TdbgReader &r, int32_t step)
         return nullptr;
     }
     // seek to the snapshot
-    if (lseek(r.file_index, r.index[step], SEEK_SET) != 0)
+    if (lseek(r.file_index, r.index[step], SEEK_SET) < 0)
     {
         return nullptr;
     }
