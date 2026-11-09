@@ -26,6 +26,7 @@
 
 #include <iostream>
 #include <string>
+#include <cstring>
 #include <cstdlib>
 #include <thread>
 #include <mutex>
@@ -81,14 +82,19 @@ public:
     }
     void enqueue(const T &val)
     {
-        Node* temp = new Node(val);
-        if (rear == nullptr) 
+        Node *n = new Node();
+        n->data = val;
+        n->next = nullptr;
+
+        if (isEmpty())
         {
-            front = rear = temp;
-        } else 
+            front = n;
+            rear = n;
+        }
+        else
         {
-            rear->next = temp;
-            rear = temp;
+            rear->next = n;
+            rear = n;
         }
         count++;
     }
@@ -138,13 +144,55 @@ bool sendAll(int sock, const char *buf, size_t n)
 {
     // Reply format: [status: 1 byte][sending_material][checksum: 4 bytes].
     // send() may send fewer bytes than asked for, so keep calling it until all n bytes are sent.
-    
+    size_t done = 0;
+    while (done < n)
+    {
+        ssize_t k = send(sock, buf + done, n - done, MSG_NOSIGNAL);
+        if (k <= 0)
+        {
+            return false;
+        }
+        done += k;
+    }
+    return true;
 }
 bool sendError(int sock, const string &message)
 {
     // Reply format: [status: 1 byte][payload until close][checksum: 4 bytes].
     // For an error: send one byte with value 1, then the message text. 
+    char status = 1;
+    if (!sendAll(sock, &status, 1))
+    {
+        return false;
+    }
+    uint32_t crc = 0xFFFFFFFFu;
+
+    crc = crcTick(crc, status); 
+
+    for (size_t i = 0; i < message.size(); ++i)\
+    {
+        char c = message[i];
+        if (!sendAll(sock, &c, 1)) 
+        {
+            return false;
+        }
+        crc = crcTick(crc, (unsigned char)c);
+    }
+    
+    
+    crc ^= 0xFFFFFFFFu;
+    char tail[4];
+    tail[0] = (crc >> 0) & 0xFF;
+    tail[1] = (crc >> 8) & 0xFF;
+    tail[2] = (crc >> 16) & 0xFF;
+    tail[3] = (crc >> 24) & 0xFF;
+    if (!sendAll(sock, tail, 4))
+    {
+        return false;
+    }
+    return true;
 }
+
 int createListenSocket(int port)
 { 
     // Create a TCP socket with SOCK_CLOEXEC(flag).
@@ -152,12 +200,59 @@ int createListenSocket(int port)
     // bind() to the port on any address, then listen(LISTEN_BACKLOG).
     // If bind or listen fails, print the error and exit, because without this socket we cannot work.
     
-    
+    int s = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (s < 0)
+    {
+        perror("socket");
+        exit(1);
+    }
+
+    int opt = 1;
+    setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port = htons(port);
+
+    if (bind(s, (struct sockaddr *)&addr, sizeof(addr)) < 0)
+    {
+        perror("bind");
+        exit(1);
+    }
+    if (listen(s, LISTEN_BACKLOG) < 0)
+    {
+        perror("listen");
+        exit(1);
+    }
+    return s;
+
 }
 int connectToServer(const char *host, int port)
 {
     // Create a TCP socket (SOCK_CLOEXEC) and connect it to host:port.
     // Return the socket, or -1 if the connection fails 
+    int s = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (s < 0)
+    {
+        return -1;
+    }
+    sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+
+    if (inet_pton(AF_INET, host, &addr.sin_addr) != 1)
+    {
+        close(s);
+        return -1;
+    }
+    if (connect(s, (struct sockaddr *)&addr, sizeof(addr)) < 0)
+    {
+        close(s);
+        return -1;
+    }
+    return s;
 }
 
 // =============================================================================================
