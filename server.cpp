@@ -701,22 +701,176 @@ void writeTdbg(Timeline &timeline, const char *tdbgPath)
 	fclose(f);
 	delete[] index;
 }
-// main section
-int32_t main() // in this we are validating the source.bin file, resolving the program, executing the program and writing the timeline to the tdbg file
-{
+// // main section
+// int32_t main() // in this we are validating the source.bin file, resolving the program, executing the program and writing the timeline to the tdbg file
+// {
 
-    if (!validateProgram("source.bin"))
+//     if (!validateProgram("source.bin"))
+//     {
+// 		cout << "error failed to validate source.bin" << endl;
+//         return 1;
+//     }
+
+//     int64_t mainOffset = resolveProgram("source.bin", "resolve.bin");
+
+//     Timeline timeline;
+//     executeProgram("resolve.bin", mainOffset, timeline);
+
+//     writeTdbg(timeline, "session.tdbg");
+
+//     return 0;
+// }
+int32_t main(int ac, char *av[]) // ac is the argument count and av is the argument vector, which contains the command line arguments passed to the program
+// if i type ./server 5001 then ac = 2 and av[0] = ./server and av[1] = 5001
+{
+    int pt = 5001; 
+    if (ac >= 2)    //check if we type a number 
     {
-		cout << "error failed to validate source.bin" << endl;
+        pt = stoi(av[1]);  // conver the string "5001" to integer 5001
+    }
+    // create the main listening socket ->the door
+    int srvS = socket(AF_INET, SOCK_STREAM, 0); // at_inet mean ipv4 and sock_stream mean tcp and 0 is the default protocol     
+    // when we open text file os give an integer to represent file 
+    // we call this a file descriptor
+
+// so if os successfully create the socket it return intger and we store it 
+//if fail it return -1
+
+// Set a timeout on the socket so it doesn't hang forever
+struct timeval tv;
+tv.tv_sec = 5;  // 5 seconds
+tv.tv_usec = 0;
+setsockopt(srvS, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    int op = 1; 
+    setsockopt(srvS, SOL_SOCKET, SO_REUSEADDR, &op, sizeof(op)); // 0 on success and -1 ofail it return 
+    // set socket use to avoid address alreading in use error
+    sockaddr_in ad;   // datastructure  use to store ipv4 adn port no.
+    memset(&ad, 0, sizeof(ad)); //its job is to wipe the address structure clean by setting every byte to 0
+    ad.sin_family = AF_INET; 
+    ad.sin_addr.s_addr = INADDR_ANY;
+    ad.sin_port = htons(pt);
+
+
+    // bind attack the socket to the port
+    if (bind(srvS, (sockaddr*)&ad, sizeof(ad)) < 0) // o on success and -1 on fail it return then compare
+    {
+        perror("bind");
         return 1;
     }
+    listen(srvS, 5);
+    // listem  do two things
+    //change the state -> convert active socket into passive  which accepts incoming connection
+    //and sets up a waiting line (queue) for incoming client 
 
-    int64_t mainOffset = resolveProgram("source.bin", "resolve.bin");
 
-    Timeline timeline;
-    executeProgram("resolve.bin", mainOffset, timeline);
+    // infinite loop to accept client connections from LB and process them
+    while (true)
+    {
+        int cliF = accept(srvS, nullptr, nullptr);//-1 if fail  
+        if (cliF < 0) 
+        {
+            continue;
+        }
 
-    writeTdbg(timeline, "session.tdbg");
+        // receive source.bin and verify CRC
+        vector<char> rv;
+        char b[65536];
+        ssize_t n;
+        while ((n = recv(cliF, b, sizeof(b), 0)) > 0)// receive data from socket  return 0 if connection close menas data complete eof an d-1 on error 
+        {
+            rv.insert(rv.end(), b, b + n);
+        }
+        
+
+
+//verification and then processing if verify correctly
+        TailSeal sl;
+        if (!rv.empty())
+        { 
+            sl.push(rv.data(), rv.size());
+        }
+        
+        string err = "";
+        bool ok = sl.ok();
+        
+        if (!ok) 
+        {
+            err = "upload checksum mismatch";
+        } 
+        else 
+        {
+            // strip the 4-byte CRC and write source.bin
+            FILE* fp = fopen("source.bin", "wb");
+            fwrite(rv.data(), 1, rv.size() - 4, fp);
+            fclose(fp);
+
+            // run Phase 1 pipeline
+            if (!validateProgram("source.bin")) 
+            {
+                ok = false;
+                err = "validation failed";
+            } 
+            else 
+            {
+                int64_t mOff = resolveProgram("source.bin", "resolve.bin");
+                if (mOff == -1) 
+                {
+                    ok = false;
+                    err = "main function not found or resolve failed";
+                } 
+                else 
+                {
+                    Timeline tl;
+                    executeProgram("resolve.bin", mOff, tl);
+                    writeTdbg(tl, "session.tdbg");
+                }
+            }
+        }
+
+        // send Reply [status][body][crc32]
+        char st = ok ? 0 : 1;
+        uint32_t crc = 0xFFFFFFFFu;
+        
+        // send status
+        send(cliF, &st, 1, 0);
+        crc = crcTick(crc, (unsigned char)st);
+
+        if (ok) 
+        {
+            // send the .tdbg file
+            FILE* td = fopen("session.tdbg", "rb");
+            while ((n = fread(b, 1, sizeof(b), td)) > 0) 
+            {
+                send(cliF, b, n, 0);
+                for (int i = 0; i < n; i++) 
+                {
+                    crc = crcTick(crc, (unsigned char)b[i]);
+                }
+            }
+            fclose(td);
+        } 
+        else 
+        {
+            // send the error message
+            for (char ch : err) 
+            {
+                send(cliF, &ch, 1, 0);
+                crc = crcTick(crc, (unsigned char)ch);
+            }
+        }
+
+        // send CRC trailer
+        crc ^= 0xFFFFFFFFu;
+        char tr[4] = 
+        {
+            (char)(crc & 0xFF), (char)((crc>>8) & 0xFF),
+            (char)((crc>>16) & 0xFF), (char)((crc>>24) & 0xFF)
+        };
+        send(cliF, tr, 4, 0);
+
+        close(cliF);
+    }
 
     return 0;
 }
@@ -788,3 +942,19 @@ int32_t main() // in this we are validating the source.bin file, resolving the p
 // 20-53       snapshot 1      depth = 1, main frame, k=5
 // 54-85       snapshot 2      depth = 1, main frame, k=15
 // 86-101      index array      offset of snapshot 1 = 20, offset of snapshot 2 = 54
+
+
+
+/*
+killall server
+killall lb
+killall client
+
+./server 5001
+
+./lb
+
+./client 127.0.0.1 5000
+
+start source.bin
+*/

@@ -75,3 +75,8 @@ Implemented the linked-list stack which i commit
 ->implemented server wakeup   ld.cpp part a
 
 ->implement lb.cpp completely
+
+10-11-2026
+
+-> final changed default ip address from 127.0.0.0 to 127.0.0.1 beacuse 127.0.0.0 is an invalid host address while pure Linux sometimes tolerates it, Windows and WSL strictly block it, causing the connection to fail.
+-> runing completely

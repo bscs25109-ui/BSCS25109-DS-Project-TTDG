@@ -115,3 +115,47 @@ public:
         return got == want;
     }
 };
+
+
+/*
+how connection is establish 
+
+[client]  -> (127.0.0.0 :5000)  ->
+[LB]   ->(127.0.0.0:5001)  ->  server
+
+
+1:  first client connect to the LB
+    > in client.cpp in  main() and cmdstart()
+    we uses connetiontohost(lbhost ,lbport) to establish
+    a tcp connection to lb
+    use the default address and port use hardcored in cpp
+    string LB_HOST = "127.0.0.0";
+    int LB_PORT = 5000;
+
+2:  the LB accept the client  
+    > in LB.cpp in main and acceptloop()
+    we use LB creates a listening door on lbport
+    using createlistensocket(lbport)and accept after alient connect
+    as same port 5000
+
+3: the LB connects to the server
+    > in LB.cpp in relayoneclient() and  connecttoseverwwithwakeup()
+    the lb tries to connet to the server using
+    connecttoserver(serverhost, serverport) if fail it run system("./server 5001 &")
+    use the default address and port use hardcored in cpp
+    int lbPort = 5000;
+    string serverHost = "127.0.0.0";
+    int serverPort = 5001;
+
+4:  the sever listen for the client 
+    > in server.cpp in main()
+    create a listening socket and binds it to pt(the port passed to it by the lb)
+    usinf 5001 port which is passed by system() command
+
+
+
+127.0.0.1 is the standard localhost address
+127.0.0.0 is the network address for the loopback subnet
+
+so i use the 127.0.0.1
+*/

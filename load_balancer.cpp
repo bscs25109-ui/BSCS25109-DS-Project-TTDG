@@ -47,7 +47,7 @@ const int MAX_PENDING_CLIENTS = 8;         // clients allowed to wait in our que
 const int STARTUP_MAX_ATTEMPTS = 50;       // after starting the server, how many times we try to connect
 const int STARTUP_POLL_INTERVAL_MS = 100;  // wait between those tries (50 x 100 ms = 5 seconds in total)
 int lbPort = 5000;
-string serverHost = "127.0.0.0";
+string serverHost = "127.0.0.1";
 int serverPort = 5001;
 
 
@@ -306,7 +306,7 @@ int connectToServerWithWakeup()
 // PART 2: PASSING THE STRING AND THE REPLY (one client, called by the main thread only)
 // =============================================================================================
 
-
+/*
 void relayOneClient(ClientInfo &c)
 {
     // 1. serverSock = connectToServerWithWakeup().
@@ -349,7 +349,40 @@ void relayOneClient(ClientInfo &c)
     close(c.sock);
 }
 
+*/
+void relayOneClient(ClientInfo &c)
+{
+    cout << "[LB] 1. Trying to connect to server..." << endl;
+    int serverSock = connectToServerWithWakeup();
+    
+    if (serverSock == -1)
+    {
+        sendError(c.sock, "backend server failed to start");
+        close(c.sock);
+        return;
+    }
+    
+    cout << "[LB] 2. Connected! Reading from client..." << endl;
+    char buff[IO_BUFFER_SIZE];
+    ssize_t k;
+    while ((k = recv(c.sock, buff, IO_BUFFER_SIZE, 0)) > 0)
+    {
+        if (!sendAll(serverSock, buff, k)) break;
+    }
 
+    cout << "[LB] 3. Finished reading client. Sending EOF to server..." << endl;
+    shutdown(serverSock, SHUT_WR);
+
+    cout << "[LB] 4. Waiting for server reply..." << endl;
+    while ((k = recv(serverSock, buff, IO_BUFFER_SIZE, 0)) > 0)
+    {
+        if (!sendAll(c.sock, buff, k)) break;
+    }
+
+    cout << "[LB] 5. Finished! Closing." << endl;
+    close(serverSock);
+    close(c.sock);
+}
 // =============================================================================================
 // PART 3: THE TWO THREADS
 // =============================================================================================
