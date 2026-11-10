@@ -514,7 +514,12 @@ void executeProgram(const char *resolveBinPath, int64_t mainOffset, Timeline &ti
         {
             Variable* v = findVar(top, tokens[1].text);
             int32_t val = getVarValue(top, tokens[2].text);
-
+            if (v == nullptr) 
+            {
+                cout << "error variable " << tokens[1].text << " not defined" << endl;
+                break;    
+            }
+            
             if (text == "add")
             {
                 v->value = v->value + val;

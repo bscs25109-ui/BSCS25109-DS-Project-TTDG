@@ -672,7 +672,16 @@ bool runCommand(DebugSession &s, const string &line, bool &quitRequested)
             return false;
         }
         string dir = words[idx + 1];
-        int32_t n = stoi(words[idx + 2]);
+        int32_t n = 0;
+        try
+        {
+            n = stoi(words[idx + 2]);
+        } 
+        catch (...) 
+        {
+            cout << "invalid jump value" << endl;
+            return false;
+        }
         if(n <= 0 || n > MAX_JUMP)
         {
             cout << "invalid jump value" << endl;
