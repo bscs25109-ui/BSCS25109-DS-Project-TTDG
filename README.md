@@ -82,3 +82,5 @@ Implemented the linked-list stack which i commit
 -> runing completely
 
 ->some bug fix
+
+-> final changing after testing 

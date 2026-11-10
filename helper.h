@@ -159,3 +159,40 @@ how connection is establish
 
 so i use the 127.0.0.1
 */
+
+
+
+/*
+g++ -std=c++17 server.cpp -o server
+g++ -std=c++17 load_balancer.cpp -o lb
+g++ -std=c++17 client.cpp -o client
+
+
+
+killall server
+killall lb
+killall client
+
+
+./server 5001
+
+./lb
+
+./client 
+
+start source.bin
+
+
+
+
+for giffernt port no. 
+
+./server 8001
+
+./lb 127.0.0.1 8001 8000
+
+./client 127.0.0.1 8000
+
+start source.bin
+
+*/
